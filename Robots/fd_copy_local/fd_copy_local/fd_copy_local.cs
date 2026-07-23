@@ -24,7 +24,6 @@ namespace cAlgo.Robots
         public double VolumeMultiplier { get; set; }
 
         private string _filePath;
-        //private string _lastReadContent = "";
         private readonly object _fileLock = new object();
 
         protected override void OnStart()
@@ -35,10 +34,7 @@ namespace cAlgo.Robots
 
             if (Role == AccountRole.Master)
             {
-                Print("Modo MASTER Ativado. Monitorando ordens...");
-                PendingOrders.Created += PendingOrders_Created;
-                PendingOrders.Modified += PendingOrders_Modified;
-                PendingOrders.Cancelled += PendingOrders_Cancelled;
+                Print("Modo MASTER Ativado. Monitorando posições a mercado...");
                 Positions.Opened += Positions_Opened;
                 Positions.Modified += Positions_Modified;
                 Positions.Closed += Positions_Closed;
@@ -55,7 +51,6 @@ namespace cAlgo.Robots
                 {
                     if (System.IO.File.Exists(_filePath))
                     {
-                        // Sobrescreve o arquivo deixando-o completamente em branco
                         System.IO.File.WriteAllText(_filePath, string.Empty);
                         Print("-> [PROTEÇÃO] Arquivo de ponte antigo limpo com sucesso para evitar ordens fantasmas.");
                     }
@@ -64,13 +59,10 @@ namespace cAlgo.Robots
                 {
                     Print("-> [AVISO] Não foi possível limpar o arquivo no início: " + ex.Message);
                 }
-                // ================================================================
-
-                
             }
         }
-        
-         protected override void OnTick()
+
+        protected override void OnTick()
         {
         }
 
@@ -85,7 +77,6 @@ namespace cAlgo.Robots
                 string[] lines;
                 lock (_fileLock)
                 {
-                    // Lê todas as linhas acumuladas no arquivo
                     using (var fs = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     using (var sr = new StreamReader(fs))
                     {
@@ -95,11 +86,11 @@ namespace cAlgo.Robots
                         lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
                     }
 
-                    // Se leu comandos com sucesso, limpa o arquivo imediatamente para os próximos sinais
+                    // Limpa o arquivo imediatamente após ler
                     System.IO.File.WriteAllText(_filePath, string.Empty);
                 }
 
-                // Processa cada sinal na ordem exata em que eles aconteceram
+                // Processa os sinais recebidos
                 foreach (var line in lines)
                 {
                     if (string.IsNullOrEmpty(line)) continue;
@@ -117,58 +108,8 @@ namespace cAlgo.Robots
         }
 
         // ==========================================
-        // EVENTOS DO MASTER
+        // EVENTOS DO MASTER (Apenas Posições Abertas)
         // ==========================================
-        private void PendingOrders_Created(PendingOrderCreatedEventArgs args)
-        {
-            try
-            {
-                var ord = args.PendingOrder;
-                Print("-> Master detectou NOVA ORDEM PENDENTE criada! ID: {0}, Ativo: {1}", ord.Id, ord.SymbolName);
-                
-                SendSignal("PENDING_CREATE|" + ord.Id + "|" + ord.SymbolName + "|" + ord.OrderType + "|" + ord.TradeType + "|" + ord.TargetPrice + "|" + ord.VolumeInUnits + "|" + Account.Balance);
-                TriggerPendingModification(ord);
-            }
-            catch (Exception ex)
-            {
-                Print("Erro no evento PendingOrders_Created: " + ex.Message);
-            }
-        }
-
-        private void PendingOrders_Modified(PendingOrderModifiedEventArgs args)
-        {
-            try
-            {
-                Print("-> Master detectou MODIFICAÇÃO na ordem pendente ID: {0}", args.PendingOrder.Id);
-                TriggerPendingModification(args.PendingOrder);
-            }
-            catch (Exception ex)
-            {
-                Print("Erro no evento PendingOrders_Modified: " + ex.Message);
-            }
-        }
-
-        private void PendingOrders_Cancelled(PendingOrderCancelledEventArgs args)
-        {
-            try
-            {
-                Print("-> Master detectou CANCELAMENTO da ordem pendente ID: {0}", args.PendingOrder.Id);
-                SendSignal("PENDING_CANCEL|" + args.PendingOrder.Id);
-            }
-            catch (Exception ex)
-            {
-                Print("Erro no evento PendingOrders_Cancelled: " + ex.Message);
-            }
-        }
-
-        private void TriggerPendingModification(PendingOrder ord)
-        {
-            var symbol = Symbols.GetSymbol(ord.SymbolName);
-            double slPips = ord.StopLoss.HasValue ? Math.Round(Math.Abs(ord.TargetPrice - ord.StopLoss.Value) / symbol.PipSize, 1) : 0;
-            double tpPips = ord.TakeProfit.HasValue ? Math.Round(Math.Abs(ord.TargetPrice - ord.TakeProfit.Value) / symbol.PipSize, 1) : 0;
-            SendSignal("PENDING_MODIFY|" + ord.Id + "|" + ord.SymbolName + "|" + ord.TargetPrice + "|" + slPips + "|" + tpPips);
-        }
-
         private void Positions_Opened(PositionOpenedEventArgs args)
         {
             try
@@ -225,7 +166,6 @@ namespace cAlgo.Robots
             {
                 try
                 {
-                    // Mudamos para Append: o Master agora ADICIONA linhas no final, sem apagar o que veio antes
                     using (var fs = new FileStream(_filePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
                     using (var sw = new StreamWriter(fs))
                     {
@@ -240,7 +180,7 @@ namespace cAlgo.Robots
         }
 
         // ==========================================
-        // PROCESSAMENTO NO SLAVE
+        // PROCESSAMENTO NO SLAVE (Apenas Posições)
         // ==========================================
         private void ProcessSignal(string signal)
         {
@@ -252,84 +192,36 @@ namespace cAlgo.Robots
 
             switch (action)
             {
-                case "PENDING_CREATE":
-                    string symName = parts[2];
-                    PendingOrderType ordType = (PendingOrderType)Enum.Parse(typeof(PendingOrderType), parts[3]);
-                    TradeType tType = (TradeType)Enum.Parse(typeof(TradeType), parts[4]);
-                    double targetPrice = double.Parse(parts[5]);
-                    double pUnits = CalculateAndValidateUnits(double.Parse(parts[6]), double.Parse(parts[7]), symName);
-                    
-                    if (pUnits > 0) PlacePendingOrder(ordType, symName, pUnits, targetPrice, masterId, tType);
-                    break;
-
-              case "PENDING_MODIFY":
-                    // 1. Declarar e ler todas as variáveis do sinal primeiro
-                    string pendingSymName = parts[2];
-                    double newTargetPrice = double.Parse(parts[3]);
-                    double pSlPips = double.Parse(parts[4]);
-                    double pTpPips = double.Parse(parts[5]);
-                    
-                    // 2. Localizar a ordem pendente no Slave usando o ID do Master como Label
-                    var pendingOrd = PendingOrders.FirstOrDefault(o => o.Label == masterId);
-                    
-                    if (pendingOrd != null)
-                    {
-                        // Passamos apenas o valor puro dos pips (ou nulo se for 0)
-                        double? slParam = pSlPips > 0 ? pSlPips : (double?)null;
-                        double? tpParam = pTpPips > 0 ? pTpPips : (double?)null;
-                        
-                        // Usamos a assinatura moderna oficial com o Tipo de Proteção explícito (cAlgo.API.ProtectionType.Pips)
-                        ModifyPendingOrder(
-                            pendingOrd, 
-                            newTargetPrice, 
-                            slParam, 
-                            tpParam, 
-                            ProtectionType.Relative, 
-                            pendingOrd.ExpirationTime
-                        );
-                    }
-                    break;
-
-                case "PENDING_CANCEL":
-                    var ordToCancel = PendingOrders.FirstOrDefault(o => o.Label == masterId);
-                    if (ordToCancel != null) CancelPendingOrder(ordToCancel);
-                    break;
-
                 case "POSITION_OPEN":
-                    string masterPosId = parts[1];
-                    symName = parts[2];
-                    tType = (TradeType)Enum.Parse(typeof(TradeType), parts[3]);
+                    string symName = parts[2];
+                    TradeType tType = (TradeType)Enum.Parse(typeof(TradeType), parts[3]);
                     double mUnits = double.Parse(parts[4]);
                     double mBalance = double.Parse(parts[5]);
 
-                    // ================================================================
-                    // TRAVA ANTIDUPLICAÇÃO: 
-                    // Verifica se já existe uma ordem (pendente ou executada) com esse ID no Label
-                    // ================================================================
-                    var existingPos = Positions.FirstOrDefault(p => p.Label == masterPosId);
-                    var existingPend = PendingOrders.FirstOrDefault(o => o.Label == masterPosId);
+                    // Verifica se essa posição já foi criada no Slave
+                    var existingPos = Positions.FirstOrDefault(p => p.Label == masterId);
 
-                    if (existingPos != null || existingPend != null)
+                    if (existingPos != null)
                     {
-                        Print("-> [INFO] Posição/Ordem para o ID {0} já existe no Slave. Ignorando abertura duplicada.", masterPosId);
-                        break; // Aborta a abertura de uma nova ordem a mercado
+                        Print("-> [INFO] Posição para o ID {0} já existe no Slave. Ignorando abertura duplicada.", masterId);
+                        break;
                     }
-                    // ================================================================
 
-                    // Se não existir, aí sim o Slave abre a ordem normalmente
                     double sUnits = CalculateAndValidateUnits(mUnits, mBalance, symName);
-                    ExecuteMarketOrder(tType, symName, sUnits, masterPosId, null, null);
+                    if (sUnits > 0)
+                    {
+                        // Adicionamos o cast explícito (double?)null para remover a ambiguidade do compilador
+                        ExecuteMarketOrder(tType, symName, sUnits, masterId, (double?)null, (double?)null);
+                    }
                     break;
 
                 case "POSITION_MODIFY":
-                    // 1. Declarar e ler todas as variáveis do sinal primeiro
                     string posSymName = parts[2];
                     double slPips = double.Parse(parts[3]);
                     double tpPips = double.Parse(parts[4]);
                     double masterCurrentUnits = double.Parse(parts[5]);
                     double masterCurrentBalance = double.Parse(parts[6]);
                     
-                    // 2. Localizar a posição no Slave usando o ID do Master como Label
                     var posToMod = Positions.FirstOrDefault(p => p.Label == masterId);
                     
                     if (posToMod != null)
@@ -337,7 +229,7 @@ namespace cAlgo.Robots
                         var sym = Symbols.GetSymbol(posSymName);
                         double expectedSlaveUnits = CalculateAndValidateUnits(masterCurrentUnits, masterCurrentBalance, posSymName);
                         
-                        // Executa Saída Parcial se necessário
+                        // Executa Saída Parcial se o Master realizou parcial
                         if (posToMod.VolumeInUnits > expectedSlaveUnits && expectedSlaveUnits > 0)
                         {
                             double unitsToClose = posToMod.VolumeInUnits - expectedSlaveUnits;
@@ -345,7 +237,7 @@ namespace cAlgo.Robots
                             if (unitsToClose > 0) ClosePosition(posToMod, unitsToClose);
                         }
                         
-                        // Cálculo corrigido com o cast explícito para (double?)
+                        // Atualiza Stop Loss e Take Profit
                         double? sl = slPips > 0 ? (posToMod.TradeType == TradeType.Buy ? posToMod.EntryPrice - (slPips * sym.PipSize) : posToMod.EntryPrice + (slPips * sym.PipSize)) : (double?)null;
                         double? tp = tpPips > 0 ? (posToMod.TradeType == TradeType.Buy ? posToMod.EntryPrice + (tpPips * sym.PipSize) : posToMod.EntryPrice - (tpPips * sym.PipSize)) : (double?)null;
                         
@@ -365,31 +257,19 @@ namespace cAlgo.Robots
             var symbol = Symbols.GetSymbol(symbolName);
             double finalUnits = 0;
 
-            // Se o usuário digitou um valor maior que 0 (ex: 3 ou 0.5)
             if (VolumeMultiplier > 0)
             {
-                // Calcula o lote estritamente baseado no multiplicador fixo
                 finalUnits = masterUnits * VolumeMultiplier;
                 Print("-> [CÁLCULO] Usando Multiplicador Fixo: {0}x. Unidades Master: {1} -> Unidades Slave: {2}", VolumeMultiplier, masterUnits, finalUnits);
             }
             else
             {
-                // Se for 0, mantém o cálculo clássico automático baseado na proporção dos saldos
                 double ratio = Account.Balance / masterBalance;
                 finalUnits = masterUnits * ratio;
                 Print("-> [CÁLCULO] Usando Proporção por Saldo (Auto). Proporção: {0:F2}x. Unidades Slave: {1}", ratio, finalUnits);
             }
 
-            // Normaliza o valor final de acordo com o lote mínimo e passos permitidos pela corretora do Slave
             return symbol.NormalizeVolumeInUnits(finalUnits);
-        }
-
-        private void PlacePendingOrder(PendingOrderType oType, string sym, double units, double price, string label, TradeType tType)
-        {
-            if (oType == PendingOrderType.Limit) 
-                PlaceLimitOrder(tType, sym, units, price, label);
-            else if (oType == PendingOrderType.Stop) 
-                PlaceStopOrder(tType, sym, units, price, label);
         }
     }
 }

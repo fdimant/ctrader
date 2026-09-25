@@ -15,6 +15,9 @@ namespace cAlgo
     [Indicator(IsOverlay = true, TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class MultiTimeframeFVGFinal : Indicator
     {
+        [Parameter("Modo SMC 2", DefaultValue = false, Group = "Modo Especial SMC")]
+        public bool SmcMode2 { get; set; }
+
         [Parameter("Modo de Exibição", DefaultValue = DisplayMode.Ambos, Group = "Configurações Gerais")]
         public DisplayMode SelectedMode { get; set; }
 
@@ -29,9 +32,6 @@ namespace cAlgo
 
         [Parameter("Desenhar TFs Inferiores?", DefaultValue = false, Group = "Visual")]
         public bool DrawLowerTFs { get; set; }
-
-        //[Parameter("Manter Mitigados Até Fim do Dia?", DefaultValue = true, Group = "Visual")]
-        //public bool KeepMitigatedUntilEndOfDay { get; set; }
 
         // --- TIMEFRAMES, CORES E RASTROS ---
         
@@ -84,6 +84,13 @@ namespace cAlgo
         [Parameter("Manter Rastro?", Group = "5 Minutos", DefaultValue = true)]
         public bool M5Trace { get; set; }
 
+        [Parameter("Ver 3 Minutos?", Group = "3 Minutos", DefaultValue = true)]
+        public bool ShowM3 { get; set; }
+        [Parameter("Cor 3 Minutos", Group = "3 Minutos", DefaultValue = "#FFFFFFFF")]
+        public Color M3Color { get; set; }
+        [Parameter("Manter Rastro?", Group = "3 Minutos", DefaultValue = true)]
+        public bool M3Trace { get; set; }
+
         private class FvgZone
         {
             public string Id { get; set; }
@@ -105,20 +112,46 @@ namespace cAlgo
 
             _allActiveGaps.Clear();
 
-            if (ShowWeekly) ProcessTimeframe(TimeFrame.Weekly, WeeklyColor, "W1", WeeklyTrace);
-            if (ShowDaily) ProcessTimeframe(TimeFrame.Daily, DailyColor, "D1", DailyTrace);
-            if (ShowH4) ProcessTimeframe(TimeFrame.Hour4, H4Color, "H4", H4Trace);
-            if (ShowH1) ProcessTimeframe(TimeFrame.Hour, H1Color, "H1", H1Trace);
-            if (ShowM30) ProcessTimeframe(TimeFrame.Minute30, M30Color, "M30", M30Trace);
-            if (ShowM15) ProcessTimeframe(TimeFrame.Minute15, M15Color, "M15", M15Trace);
-            if (ShowM5) ProcessTimeframe(TimeFrame.Minute5, M5Color, "M5", M5Trace);
+            // --- LÓGICA DO MODO SMC 2 ---
+            if (SmcMode2)
+            {
+                if (TimeFrame == TimeFrame.Hour4)
+                {
+                    // No 4H, desenha 1H e 30m
+                    ProcessTimeframe(TimeFrame.Hour, H1Color, "H1", true);
+                    ProcessTimeframe(TimeFrame.Minute30, M30Color, "M30", true);
+                }
+                else if (TimeFrame == TimeFrame.Hour)
+                {
+                    // No 1H, desenha 5m
+                    ProcessTimeframe(TimeFrame.Minute5, M5Color, "M5", true);
+                }
+                else if (TimeFrame == TimeFrame.Minute30)
+                {
+                    // No 30m, desenha 3m
+                    ProcessTimeframe(TimeFrame.Minute3, M3Color, "M3", true);
+                }
+            }
+            else
+            {
+                // Modo Normal (Configuração Manual)
+                if (ShowWeekly) ProcessTimeframe(TimeFrame.Weekly, WeeklyColor, "W1", WeeklyTrace);
+                if (ShowDaily) ProcessTimeframe(TimeFrame.Daily, DailyColor, "D1", DailyTrace);
+                if (ShowH4) ProcessTimeframe(TimeFrame.Hour4, H4Color, "H4", H4Trace);
+                if (ShowH1) ProcessTimeframe(TimeFrame.Hour, H1Color, "H1", H1Trace);
+                if (ShowM30) ProcessTimeframe(TimeFrame.Minute30, M30Color, "M30", M30Trace);
+                if (ShowM15) ProcessTimeframe(TimeFrame.Minute15, M15Color, "M15", M15Trace);
+                if (ShowM5) ProcessTimeframe(TimeFrame.Minute5, M5Color, "M5", M5Trace);
+                if (ShowM3) ProcessTimeframe(TimeFrame.Minute3, M3Color, "M3", M3Trace);
+            }
 
             DrawGapsOnChart();
         }
 
         private void ProcessTimeframe(TimeFrame tf, Color color, string tfLabel, bool allowTrace)
         {
-            if (!DrawLowerTFs && tf < TimeFrame) return;
+            // Ignora o filtro de TF inferior se o Modo SMC 2 estiver ativo
+            if (!SmcMode2 && !DrawLowerTFs && tf < TimeFrame) return;
 
             var bars = MarketData.GetBars(tf);
             int count = bars.Count;
@@ -155,15 +188,21 @@ namespace cAlgo
                         if (isBear && Symbol.Ask >= top) { isMitigated = true; mitigationTime = Server.TimeInUtc; }
                     }
 
-                    // --- LÓGICA DE FILTRAGEM ---
-                    
-                    // 1. Filtrar pelo Modo de Exibição Geral
-                    if (SelectedMode == DisplayMode.Atuais && isMitigated) continue;
-                    if (SelectedMode == DisplayMode.SomenteMitigados && !isMitigated) continue;
-
-                    // 2. Se for Mitigado, verificar se o timeframe específico permite rastro
-                    if (isMitigated && !allowTrace) continue;
-
+                    // --- REGRAS DE FILTRAGEM ---
+                    if (SmcMode2)
+                    {
+                        if (isMitigated)
+                        {
+                            DateTime currentBarOpenTime = Bars.OpenTimes[Bars.Count - 1];
+                            if (mitigationTime < currentBarOpenTime) continue;
+                        }
+                    }
+                    else
+                    {
+                        if (SelectedMode == DisplayMode.Atuais && isMitigated) continue;
+                        if (SelectedMode == DisplayMode.SomenteMitigados && !isMitigated) continue;
+                        if (isMitigated && !allowTrace) continue;
+                    }
 
                     _allActiveGaps.Add(new FvgZone
                     {
@@ -189,21 +228,20 @@ namespace cAlgo
                     Chart.RemoveObject(obj.Name);
             }
 
+            int effectiveOpacity = SmcMode2 ? 30 : Opacity;
+
             foreach (var gap in _allActiveGaps)
             {
                 var startIndex = Bars.OpenTimes.GetIndexByTime(gap.StartTime);
                 if (startIndex == -1) continue;
 
-                //int currentIndex = Bars.Count;
                 string uniqueId = "fvg_mtf_" + gap.Id;
-
                 int currentIndex;
 
                 if (gap.Mitigated)
                 {
                     currentIndex = Bars.OpenTimes.GetIndexByTime(gap.MitigationTime);
 
-                    // Se não encontrar exatamente, procura o candle mais próximo
                     if (currentIndex < 0)
                     {
                         currentIndex = Bars.Count - 1;
@@ -223,42 +261,43 @@ namespace cAlgo
                     currentIndex = Bars.Count - 1;
                 }
 
+                if (!gap.Mitigated)
+                {
+                    Color fillColor = Color.FromArgb(effectiveOpacity, gap.Color);
+
+                    Chart.DrawRectangle(
+                        uniqueId,
+                        startIndex,
+                        gap.Bottom,
+                        currentIndex,
+                        gap.Top,
+                        fillColor).IsFilled = true;
+
+                    Chart.DrawTrendLine(
+                        "line_" + uniqueId,
+                        startIndex,
+                        gap.BasePrice,
+                        currentIndex,
+                        gap.BasePrice,
+                        gap.Color,
+                        1,
+                        LineStyle.Solid);
+                }
+                else
+                {
+                    Chart.DrawTrendLine(
+                        "line_" + uniqueId,
+                        startIndex,
+                        gap.BasePrice,
+                        currentIndex,
+                        gap.BasePrice,
+                        gap.Color,
+                        1,
+                        LineStyle.DotsRare);
+                }
+
                 string label = "NC " + gap.TfName + (gap.Mitigated ? " (M)" : "");
                 Chart.DrawText("txt_" + uniqueId, label, currentIndex, gap.BasePrice, gap.Color);
-                if (!gap.Mitigated)
-{
-    Color fillColor = Color.FromArgb(Opacity, gap.Color);
-
-    Chart.DrawRectangle(
-        uniqueId,
-        startIndex,
-        gap.Bottom,
-        currentIndex,
-        gap.Top,
-        fillColor).IsFilled = true;
-
-    Chart.DrawTrendLine(
-        "line_" + uniqueId,
-        startIndex,
-        gap.BasePrice,
-        currentIndex,
-        gap.BasePrice,
-        gap.Color,
-        1,
-        LineStyle.Solid);
-}
-else
-{
-    Chart.DrawTrendLine(
-        "line_" + uniqueId,
-        startIndex,
-        gap.BasePrice,
-        currentIndex,
-        gap.BasePrice,
-        gap.Color,
-        1,
-        LineStyle.DotsRare);
-}
             }
         }
     }

@@ -16,18 +16,28 @@ namespace cAlgo
     [Indicator(IsOverlay = true, TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class MouseOverOHLC : Indicator
     {
-        // --- User Parameters ---
-        [Parameter("Text Color", DefaultValue = "Yellow")]
+        // --- Display Parameters ---
+        [Parameter("Text Color", Group = "Display", DefaultValue = "Yellow")]
         public Color TextColor { get; set; }
 
-        [Parameter("Background Color", DefaultValue = "Black")]
+        [Parameter("Background Color", Group = "Display", DefaultValue = "Black")]
         public Color BackgroundColor { get; set; }
 
-        [Parameter("Font Size", DefaultValue = 11, MinValue = 8, MaxValue = 24)]
+        [Parameter("Font Size", Group = "Display", DefaultValue = 11, MinValue = 8, MaxValue = 24)]
         public int FontSize { get; set; }
 
-        [Parameter("Display Position", DefaultValue = DisplayPosition.TopLeft)]
+        [Parameter("Display Position", Group = "Display", DefaultValue = DisplayPosition.TopLeft)]
         public DisplayPosition PosicaoDisplay { get; set; }
+
+        // --- 3 Candle Feature Parameters ---
+        [Parameter("Enable 3-Candle High/Low", Group = "3 Candle Pattern", DefaultValue = false)]
+        public bool Enable3CandlePattern { get; set; }
+
+        [Parameter("Pivot Low Color", Group = "3 Candle Pattern", DefaultValue = "Red")]
+        public Color PivotLowColor { get; set; }
+
+        [Parameter("Pivot High Color", Group = "3 Candle Pattern", DefaultValue = "Green")]
+        public Color PivotHighColor { get; set; }
 
 
         private bool _exibirPainel = false;
@@ -83,6 +93,10 @@ namespace cAlgo
             {
                 _exibirPainel = !_exibirPainel;
                 _painelFundo.IsVisible = _exibirPainel;
+
+                // Aplica as cores de pivô ou restaura as cores nativas (Bull/Bear)
+                ApplyOrClearCandleColors();
+
                 _ultimoClique = DateTime.MinValue;
             }
             else
@@ -105,10 +119,7 @@ namespace cAlgo
                 var low = Bars.LowPrices[index];
                 var close = Bars.ClosePrices[index];
                 
-                // Pegamos o tempo bruto diretamente da barra
                 DateTime baseTime = Bars.OpenTimes[index];
-                
-                // Aplicamos o fuso horário oficial configurado na plataforma cTrader
                 DateTime localTime = baseTime.Add(Application.UserTimeOffset);
 
                 _textoDisplay.Text = string.Format(
@@ -161,6 +172,60 @@ namespace cAlgo
 
         public override void Calculate(int index)
         {
+            if (!_exibirPainel || !Enable3CandlePattern)
+                return;
+
+            CheckAndColorCandle(index);
+        }
+
+        private void CheckAndColorCandle(int index)
+        {
+            int targetIndex = index - 1;
+
+            if (targetIndex > 0 && index < Bars.Count)
+            {
+                double prevLow = Bars.LowPrices[targetIndex - 1];
+                double currentLow = Bars.LowPrices[targetIndex];
+                double nextLow = Bars.LowPrices[index];
+
+                double prevHigh = Bars.HighPrices[targetIndex - 1];
+                double currentHigh = Bars.HighPrices[targetIndex];
+                double nextHigh = Bars.HighPrices[index];
+
+                if (currentLow < prevLow && currentLow < nextLow)
+                {
+                    Chart.SetBarOutlineColor(targetIndex, PivotLowColor);
+                }
+                else if (currentHigh > prevHigh && currentHigh > nextHigh)
+                {
+                    Chart.SetBarOutlineColor(targetIndex, PivotHighColor);
+                }
+            }
+        }
+
+        private void ApplyOrClearCandleColors()
+        {
+            if (!Enable3CandlePattern)
+                return;
+
+            if (_exibirPainel)
+            {
+                for (int i = 1; i < Bars.Count; i++)
+                {
+                    CheckAndColorCandle(i);
+                }
+            }
+            else
+            {
+                // Restaura cada candle especificamente para a cor de contorno Bull ou Bear original do tema
+                for (int i = 0; i < Bars.Count; i++)
+                {
+                    bool isBull = Bars.ClosePrices[i] >= Bars.OpenPrices[i];
+                    Color defaultColor = isBull ? Chart.ColorSettings.BullOutlineColor : Chart.ColorSettings.BearOutlineColor;
+                    
+                    Chart.SetBarOutlineColor(i, defaultColor);
+                }
+            }
         }
     }
 }

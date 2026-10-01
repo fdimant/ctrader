@@ -1,0 +1,22 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30011.22
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "liquidez v2", "liquidez v2\liquidez v2.csproj", "{115f26b4-d493-4e3b-ae42-9ef7e0edba5a}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{115f26b4-d493-4e3b-ae42-9ef7e0edba5a}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{115f26b4-d493-4e3b-ae42-9ef7e0edba5a}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{115f26b4-d493-4e3b-ae42-9ef7e0edba5a}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{115f26b4-d493-4e3b-ae42-9ef7e0edba5a}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

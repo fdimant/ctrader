@@ -1,0 +1,42 @@
+{
+  "ScalePrecision": 0,
+  "AutoRescale": false,
+  "IsPercentage": false,
+  "IsOverlay": false,
+  "LineOutputs": [
+    {
+      "Name": "Result",
+      "DisplayName": "Main",
+      "Style": "Solid",
+      "Color": "#00000000",
+      "Thickness": 1,
+      "PlotType": "Line",
+      "IsColorCustomizable": true,
+      "IsLastValueVisibleInTitle": true,
+      "Description": "",
+      "IsVisible": true
+    }
+  ],
+  "BarOutputs": [],
+  "Clouds": [],
+  "Levels": [],
+  "AccessRights": "None",
+  "TimeZone": "UTC",
+  "AdditionalInfoUrl": null,
+  "Parameters": [
+    {
+      "DisplayName": "",
+      "Name": "Message",
+      "Description": "",
+      "Type": "String",
+      "DefaultValue": "Hello world!",
+      "MinValue": null,
+      "MaxValue": null,
+      "Step": null,
+      "Group": null,
+      "IsValueVisibleInTitle": true,
+      "EnumTypeFullName": null
+    }
+  ],
+  "Enums": []
+}

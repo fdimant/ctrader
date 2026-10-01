@@ -1,0 +1,16 @@
+{
+  "AccessRights": "None",
+  "Parameters": [
+    {
+      "Name": "Message",
+      "DefaultValue": "Hello world!",
+      "Type": "String"
+    }
+  ],
+  "LineOutputs": [
+    {
+      "DisplayName": "Main",
+      "Name": "Result"
+    }
+  ]
+}

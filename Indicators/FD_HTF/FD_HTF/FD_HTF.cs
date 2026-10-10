@@ -86,8 +86,17 @@ namespace cAlgo
         [Parameter("Mostrar Tempo Restante", Group = "Labels HTF", DefaultValue = true)]
         public bool ShowRemainingTime { get; set; }
 
-        [Parameter("Tamanho da Fonte", Group = "Labels HTF", DefaultValue = 11, MinValue = 6, MaxValue = 16)]
+        [Parameter("Mostrar Contagem Linhas (C1, C2...)", Group = "Labels HTF", DefaultValue = false)]
+        public bool ShowCandleCount { get; set; }
+
+        [Parameter("Mostrar Contagem nas Velas (Painel)", Group = "Labels HTF", DefaultValue = true)]
+        public bool ShowLateralCandleCount { get; set; }
+
+        [Parameter("Tamanho da Fonte Geral", Group = "Labels HTF", DefaultValue = 11, MinValue = 6, MaxValue = 30)]
         public int LabelFontSize { get; set; }
+
+        [Parameter("Tamanho Fonte da Contagem (Painel)", Group = "Labels HTF", DefaultValue = 9, MinValue = 6, MaxValue = 30)]
+        public int CandleCountFontSize { get; set; }
 
         [Parameter("Cor dos Rótulos (Painel)", Group = "Labels HTF", DefaultValue = "White")]
         public Color LabelColor { get; set; }
@@ -139,13 +148,9 @@ namespace cAlgo
 
         private TimeFrame GetNextTimeFrame(TimeFrame tf)
         {
-            // Regras específicas para Micro TFs
             if (tf == TimeFrame.Minute) return TimeFrame.Minute15;
             if (tf == TimeFrame.Minute3) return TimeFrame.Minute30;
-            
-            // Qualquer outro TF menor que 1 Hora (ex: 5m, 15m, 30m) pula para 1 Hora
             if (tf < TimeFrame.Hour) return TimeFrame.Hour;
-            
             if (tf == TimeFrame.Hour) return TimeFrame.Hour4;
             if (tf == TimeFrame.Hour4) return TimeFrame.Daily;
             if (tf == TimeFrame.Daily) return TimeFrame.Weekly;
@@ -199,14 +204,12 @@ namespace cAlgo
 
             if (!IsLastBar || _htfBarsList.Count == 0) return;
 
-            // Limpa renderizações anteriores
             foreach (var obj in Chart.Objects)
             {
                 if (obj.Name.StartsWith("HTF_Lat_") || obj.Name.StartsWith("HTF_VLine_") || obj.Name.StartsWith("HTF_VLineTxt_"))
                     Chart.RemoveObject(obj.Name);
             }
 
-            // --- LINHA DIVISÓRIA VERTICAL ---
             if (ShowStartLine && Bars.Count > 1)
             {
                 TimeSpan ltfDuration = Bars.OpenTimes.LastValue - Bars.OpenTimes[Bars.Count - 2];
@@ -228,7 +231,6 @@ namespace cAlgo
                 int lastHtfIndex = htfBars.Count - 1;
                 int startHtfIndex = Math.Max(0, lastHtfIndex - CandlesPerTimeframe + 1);
 
-                // Armazena a máxima e mínima exata de todo o bloco de velas desse TF
                 double maxBlockHigh = double.MinValue;
                 double minBlockLow = double.MaxValue;
                 int startBlockIndex = currentDrawIndex;
@@ -259,7 +261,25 @@ namespace cAlgo
 
                     Chart.DrawTrendLine(bodyName, currentDrawIndex, top, currentDrawIndex, bottom, unifiedColor, BodyThickness, LineStyle.Solid);
 
-                    // --- COLETA DE DADOS PARA AS LINHAS VERTICAIS USANDO A COR ESPECÍFICA DO TF ---
+                    // --- CONTAGEM C1, C2 ACIMA E ABAIXO DAS VELAS LATERAIS ---
+                    if (ShowLateralCandleCount)
+                    {
+                        int candleCount = lastHtfIndex - i + 1;
+                        string countText = $"C{candleCount}";
+
+                        double offset = Symbol.PipSize * 2;
+
+                        var txtTop = Chart.DrawText($"HTF_Lat_CountTop_{level}_{i}", countText, currentDrawIndex, high + offset, LabelColor);
+                        txtTop.VerticalAlignment = VerticalAlignment.Bottom;
+                        txtTop.HorizontalAlignment = HorizontalAlignment.Center;
+                        txtTop.FontSize = CandleCountFontSize;
+
+                        var txtBot = Chart.DrawText($"HTF_Lat_CountBot_{level}_{i}", countText, currentDrawIndex, low - offset, LabelColor);
+                        txtBot.VerticalAlignment = VerticalAlignment.Top;
+                        txtBot.HorizontalAlignment = HorizontalAlignment.Center;
+                        txtBot.FontSize = CandleCountFontSize;
+                    }
+
                     if (ShowHtfStartLines)
                     {
                         Color vLineColor = GetVLineColor(htfBars.TimeFrame);
@@ -271,7 +291,15 @@ namespace cAlgo
                             vLineLabels[openTime] = new List<string>();
                         }
                         
-                        vLineLabels[openTime].Add(GetTfLabel(htfBars.TimeFrame));
+                        string labelText = GetTfLabel(htfBars.TimeFrame);
+                        
+                        if (ShowCandleCount)
+                        {
+                            int candleCount = lastHtfIndex - i + 1;
+                            labelText += $"(C{candleCount})";
+                        }
+
+                        vLineLabels[openTime].Add(labelText);
                         vLineColors[openTime] = vLineColor; 
                     }
 
@@ -281,7 +309,6 @@ namespace cAlgo
                 int endBlockIndex = currentDrawIndex - SpacingCandles;
                 int centerIndex = startBlockIndex + ((endBlockIndex - startBlockIndex) / 2);
 
-                // --- CABEÇALHO DO PAINEL LATERAL (ACIMA, ABAIXO OU AMBOS) ---
                 if (CabecalhoPosition != HeaderPosition.Oculto)
                 {
                     string tfLabel = GetTfLabel(htfBars.TimeFrame);
@@ -327,7 +354,6 @@ namespace cAlgo
                 currentDrawIndex += SpacingTFs;
             }
 
-            // --- DESENHO DOS RÓTULOS DAS LINHAS VERTICAIS (ALINHADOS PELA MÍNIMA DO DIA) ---
             if (ShowHtfStartLines)
             {
                 foreach (var kvp in vLineLabels)
@@ -351,15 +377,26 @@ namespace cAlgo
                     }
 
                     double referenceLow = dIndex != -1 ? _dailyBars.LowPrices[dIndex] : Bars.LowPrices.LastValue;
+                    double referenceHigh = dIndex != -1 ? _dailyBars.HighPrices[dIndex] : Bars.HighPrices.LastValue;
                     
-                    double yPos = referenceLow - (Symbol.PipSize * 5);
+                    double yPosBot = referenceLow - (Symbol.PipSize * 5);
+                    double yPosTop = referenceHigh + (Symbol.PipSize * 5);
 
-                    string vLineTxtName = $"HTF_VLineTxt_{time.Ticks}";
-                    var txtObj = Chart.DrawText(vLineTxtName, combinedLabels, time, yPos, clr);
+                    string vLineTxtNameBot = $"HTF_VLineTxt_Bot_{time.Ticks}";
+                    var txtObjBot = Chart.DrawText(vLineTxtNameBot, combinedLabels, time, yPosBot, clr);
                     
-                    txtObj.FontSize = Math.Max(6, LabelFontSize - 2);
-                    txtObj.VerticalAlignment = VerticalAlignment.Top;
-                    txtObj.HorizontalAlignment = HorizontalAlignment.Center; 
+                    // Removido o "- 2" para que o LabelFontSize escolhido seja respeitado à risca
+                    txtObjBot.FontSize = LabelFontSize;
+                    txtObjBot.VerticalAlignment = VerticalAlignment.Top;
+                    txtObjBot.HorizontalAlignment = HorizontalAlignment.Center; 
+                    
+                    string vLineTxtNameTop = $"HTF_VLineTxt_Top_{time.Ticks}";
+                    var txtObjTop = Chart.DrawText(vLineTxtNameTop, combinedLabels, time, yPosTop, clr);
+                    
+                    // Removido o "- 2"
+                    txtObjTop.FontSize = LabelFontSize;
+                    txtObjTop.VerticalAlignment = VerticalAlignment.Bottom;
+                    txtObjTop.HorizontalAlignment = HorizontalAlignment.Center;
                 }
             }
         }

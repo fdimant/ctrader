@@ -91,6 +91,13 @@ namespace cAlgo
         [Parameter("Manter Rastro?", Group = "3 Minutos", DefaultValue = true)]
         public bool M3Trace { get; set; }
 
+        [Parameter("Ver 1 Minuto?", Group = "1 Minuto", DefaultValue = true)]
+        public bool ShowM1 { get; set; }
+        [Parameter("Cor 1 Minuto", Group = "1 Minuto", DefaultValue = "#FFFFFFFF")]
+        public Color M1Color { get; set; }
+        [Parameter("Manter Rastro?", Group = "1 Minuto", DefaultValue = true)]
+        public bool M1Trace { get; set; }
+
         private class FvgZone
         {
             public string Id { get; set; }
@@ -137,6 +144,21 @@ namespace cAlgo
                     ProcessTimeframe(TimeFrame.Hour, H1Color, "H1", true);
                     ProcessTimeframe(TimeFrame.Minute30, M30Color, "M30", true);
                 }
+                else if (TimeFrame == TimeFrame.Minute5)
+                {
+                    // No 5m, desenha o próprio 5m
+                    ProcessTimeframe(TimeFrame.Minute5, M5Color, "M5", true);
+                }
+                else if (TimeFrame == TimeFrame.Minute3)
+                {
+                    // No 3m, desenha o próprio 3m
+                    ProcessTimeframe(TimeFrame.Minute3, M3Color, "M3", true);
+                }
+                else if (TimeFrame == TimeFrame.Minute)
+                {
+                    // No 1m, desenha o próprio 1m
+                    ProcessTimeframe(TimeFrame.Minute, M1Color, "M1", true);
+                }
             }
             else
             {
@@ -149,6 +171,7 @@ namespace cAlgo
                 if (ShowM15) ProcessTimeframe(TimeFrame.Minute15, M15Color, "M15", M15Trace);
                 if (ShowM5) ProcessTimeframe(TimeFrame.Minute5, M5Color, "M5", M5Trace);
                 if (ShowM3) ProcessTimeframe(TimeFrame.Minute3, M3Color, "M3", M3Trace);
+                if (ShowM1) ProcessTimeframe(TimeFrame.Minute, M1Color, "M1", M1Trace);
             }
 
             DrawGapsOnChart();

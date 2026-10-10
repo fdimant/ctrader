@@ -5,10 +5,22 @@ using cAlgo.API.Internals;
 
 namespace cAlgo
 {
+    public enum DailyBiasMode
+    {
+        Auto,
+        Continuação_de_Alta,
+        Reversão_para_Alta,
+        Continuação_de_Baixa,
+        Reversão_para_Baixa
+    }
+
     [Indicator(IsOverlay = true, TimeZone = TimeZones.UTC, AccessRights = AccessRights.None)]
     public class DailyBiasAndSMC : Indicator
     {
         // --- PARÂMETROS GERAIS ---
+        [Parameter("Tendência Diária Fixa", Group = "Viés e Estrutura", DefaultValue = DailyBiasMode.Auto)]
+        public DailyBiasMode ManualDailyBias { get; set; }
+
         [Parameter("Mostrar FVG H4 (Fase 1)?", Group = "Fase 1: Formação Diária", DefaultValue = true)]
         public bool ShowH4Fvg { get; set; }
 
@@ -90,7 +102,13 @@ namespace cAlgo
             double d1High = double.MinValue;
             double d1Low = double.MaxValue;
 
-            if (currentDailyIndex >= 2)
+            if (ManualDailyBias != DailyBiasMode.Auto)
+            {
+                // Se for manual, atribui o texto substituindo os underscores
+                tendencia = ManualDailyBias.ToString().Replace("_", " ");
+                textColor = tendencia.Contains("Alta") ? Color.LimeGreen : Color.Red;
+            }
+            else if (currentDailyIndex >= 2)
             {
                 int d1 = currentDailyIndex - 1;
                 int d2 = currentDailyIndex - 2;
@@ -170,7 +188,7 @@ namespace cAlgo
 
                         if (!isLocked)
                         {
-                            if (tendencia == "Viés Lateral" && currentDailyIndex >= 2)
+                            if (tendencia == "Viés Lateral" && currentDailyIndex >= 2 && ManualDailyBias == DailyBiasMode.Auto)
                             {
                                 if (_h1Bars.HighPrices[i] > d1High)
                                 {
@@ -346,7 +364,7 @@ namespace cAlgo
                 }
             }
 
-            // 4. --- LÓGICA DO H4 (FASE 2) COM ISOLAMENTO DA VELA DE CONFIRMAÇÃO ---
+            // 4. --- LÓGICA DO H4 (FASE 2) ---
             string h4PanelText = "";
 
             if (phase2Active && todayStart != DateTime.MinValue && dailyConfirmIndex != -1)
@@ -673,14 +691,12 @@ namespace cAlgo
             return exactStartTime;
         }
 
-        // --- ATUALIZADO: Renderização Flexível de Horários ---
         private void DesenharLiquidez(List<LiquidityZone> liqList)
         {
             foreach (var liq in liqList)
             {
                 var startIndex = Bars.OpenTimes.GetIndexByTime(liq.StartTime);
                 
-                // FALLBACK: Se o timeframe atual não tem aquela hora exata, busca o candle que "cobre" o horário
                 if (startIndex == -1) startIndex = GetCoveringIndex(Bars, liq.StartTime);
                 if (startIndex == -1) continue;
 
@@ -777,7 +793,6 @@ namespace cAlgo
             }
         }
 
-        // --- ATUALIZADO: Renderização Flexível de Horários ---
         private void DesenharFVG(List<FvgZone> gapsList, Color corBull = default(Color), Color corBear = default(Color))
         {
             if (corBull == default(Color)) corBull = Color.Green;
@@ -790,7 +805,6 @@ namespace cAlgo
 
                 var startIndex = Bars.OpenTimes.GetIndexByTime(gap.StartTime);
                 
-                // FALLBACK: Mapeamento de barras de tempos gráficos diferentes para o gráfico atual
                 if (startIndex == -1) startIndex = GetCoveringIndex(Bars, gap.StartTime);
                 if (startIndex == -1) continue;
 

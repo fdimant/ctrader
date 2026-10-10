@@ -185,7 +185,8 @@ namespace cAlgo
 
         public override void Calculate(int index)
         {
-            if (ShowPdhPdl && _dailyBars != null && _dailyBars.Count > 1)
+            // Oculta PDH/PDL caso o gráfico atual seja Diário ou superior
+            if (ShowPdhPdl && TimeFrame < TimeFrame.Daily && _dailyBars != null && _dailyBars.Count > 1)
             {
                 int lastDailyIndex = _dailyBars.Count - 1;
                 int startDailyIndex = Math.Max(1, lastDailyIndex - PdhPdlDaysCount + 1);
@@ -199,6 +200,15 @@ namespace cAlgo
                 for (int d = startDailyIndex; d <= lastDailyIndex; d++)
                 {
                     DrawPdhPdl(d);
+                }
+            }
+            else
+            {
+                // Limpeza ativa caso o usuário troque de intraday para Diário com o indicador rodando
+                foreach (var obj in Chart.Objects)
+                {
+                    if (obj.Name.StartsWith("PDH_") || obj.Name.StartsWith("PDL_"))
+                        Chart.RemoveObject(obj.Name);
                 }
             }
 
@@ -261,7 +271,6 @@ namespace cAlgo
 
                     Chart.DrawTrendLine(bodyName, currentDrawIndex, top, currentDrawIndex, bottom, unifiedColor, BodyThickness, LineStyle.Solid);
 
-                    // --- CONTAGEM C1, C2 ACIMA E ABAIXO DAS VELAS LATERAIS ---
                     if (ShowLateralCandleCount)
                     {
                         int candleCount = lastHtfIndex - i + 1;
@@ -385,7 +394,6 @@ namespace cAlgo
                     string vLineTxtNameBot = $"HTF_VLineTxt_Bot_{time.Ticks}";
                     var txtObjBot = Chart.DrawText(vLineTxtNameBot, combinedLabels, time, yPosBot, clr);
                     
-                    // Removido o "- 2" para que o LabelFontSize escolhido seja respeitado à risca
                     txtObjBot.FontSize = LabelFontSize;
                     txtObjBot.VerticalAlignment = VerticalAlignment.Top;
                     txtObjBot.HorizontalAlignment = HorizontalAlignment.Center; 
@@ -393,7 +401,6 @@ namespace cAlgo
                     string vLineTxtNameTop = $"HTF_VLineTxt_Top_{time.Ticks}";
                     var txtObjTop = Chart.DrawText(vLineTxtNameTop, combinedLabels, time, yPosTop, clr);
                     
-                    // Removido o "- 2"
                     txtObjTop.FontSize = LabelFontSize;
                     txtObjTop.VerticalAlignment = VerticalAlignment.Bottom;
                     txtObjTop.HorizontalAlignment = HorizontalAlignment.Center;

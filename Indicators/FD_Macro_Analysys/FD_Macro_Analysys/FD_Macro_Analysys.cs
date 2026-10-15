@@ -151,31 +151,20 @@ namespace cAlgo
         {
             if (!IsLastBar) return;
 
-            // --- SISTEMA DE TESTE DE JANELA E SOM ---
             if (TesteDeJanela && index > _lastTestBarIndex)
             {
                 _lastTestBarIndex = index;
                 string testMsg = $"TESTE DE JANELA: Nova vela (Index: {index}) no ativo {Symbol.Name}.";
-                
                 Print(testMsg);
 
-                if (EnableSound)
-                {
-                    Notifications.PlaySound(SoundPath);
-                }
+                if (EnableSound) Notifications.PlaySound(SoundPath);
 
                 if (RunningMode == RunningMode.RealTime)
                 {
                     BeginInvokeOnMainThread(() =>
                     {
-                        try
-                        {
-                            MessageBox.Show(testMsg, "Teste cTrader", MessageBoxButton.OK, MessageBoxImage.Information);
-                        }
-                        catch (Exception ex)
-                        {
-                            Print($"Erro ao abrir janela: {ex.Message}");
-                        }
+                        try { MessageBox.Show(testMsg, "Teste cTrader", MessageBoxButton.OK, MessageBoxImage.Information); }
+                        catch (Exception ex) { Print($"Erro ao abrir janela: {ex.Message}"); }
                     });
                 }
             }
@@ -190,13 +179,9 @@ namespace cAlgo
             }
 
             if (LinhaRompimento == BreakoutMode.Nao)
-            {
                 ClearBreakoutLines();
-            }
             else
-            {
                 DrawHistoricalBreakouts();
-            }
         }
 
         private void DrawHistoricalBreakouts()
@@ -277,11 +262,31 @@ namespace cAlgo
                     Chart.DrawTrendLine(lineName, startTime, breakoutPrice, endTime, breakoutPrice, lineColor, 2, LineStyle.Solid);
                     _activeBreakoutLines.Add(lineName);
 
+                    // --- SISTEMA DE IDENTIFICAÇÃO DE SINAL COM ATRASO (DELAY) ---
                     string stratRes = EvaluateStrategy(endTime, isBullish, LinhaRompimento);
+                    DateTime signalDrawTime = endTime;
+
+                    if (string.IsNullOrEmpty(stratRes))
+                    {
+                        // Se não confirmou no candle exato do rompimento, procura nos candles seguintes até o fim do ciclo
+                        for (int j = breakoutIndex + 1; j < ltfBars.Count; j++)
+                        {
+                            if (ltfBars.OpenTimes[j] >= htfNext) break;
+                            
+                            stratRes = EvaluateStrategy(ltfBars.OpenTimes[j], isBullish, LinhaRompimento);
+                            if (!string.IsNullOrEmpty(stratRes))
+                            {
+                                signalDrawTime = ltfBars.OpenTimes[j];
+                                stratRes += "d"; // Adiciona a marcação "d" de Delay
+                                break;
+                            }
+                        }
+                    }
+
                     if (!string.IsNullOrEmpty(stratRes))
                     {
                         string txtName = lineName + "_strat";
-                        Chart.DrawText(txtName, " " + stratRes, endTime, breakoutPrice, lineColor);
+                        Chart.DrawText(txtName, " " + stratRes, signalDrawTime, breakoutPrice, lineColor);
                         _activeBreakoutLines.Add(txtName);
                     }
                     
@@ -645,12 +650,29 @@ namespace cAlgo
                     
                     Chart.DrawTrendLine(lineName, startTime, currentBreakoutPrice, endTime, currentBreakoutPrice, lineColor, 2, LineStyle.Solid);
 
+                    // --- SISTEMA DE ATRASO PARA A VELA ATUAL EM TEMPO REAL ---
                     string stratRes = EvaluateStrategy(endTime, currentIsBullish, LinhaRompimento);
+                    DateTime signalDrawTime = endTime;
+
+                    if (string.IsNullOrEmpty(stratRes))
+                    {
+                        for (int i = currentBreakoutIndex + 1; i < ltfBars.Count; i++)
+                        {
+                            stratRes = EvaluateStrategy(ltfBars.OpenTimes[i], currentIsBullish, LinhaRompimento);
+                            if (!string.IsNullOrEmpty(stratRes))
+                            {
+                                signalDrawTime = ltfBars.OpenTimes[i];
+                                stratRes += "d";
+                                break;
+                            }
+                        }
+                    }
+
                     if (!string.IsNullOrEmpty(stratRes))
                     {
-                        Chart.DrawText(lineName + "_strat", " " + stratRes, endTime, currentBreakoutPrice, lineColor);
+                        Chart.DrawText(lineName + "_strat", " " + stratRes, signalDrawTime, currentBreakoutPrice, lineColor);
                         
-                        if (EnableAlerts && endTime > _lastAlertTime)
+                        if (EnableAlerts && signalDrawTime > _lastAlertTime)
                         {
                             string operacao = currentIsBullish ? "COMPRA" : "VENDA";
                             string numEstrat = stratRes.Replace(currentIsBullish ? "c(" : "v(", "").Replace(")", "");
@@ -658,28 +680,18 @@ namespace cAlgo
                             
                             Print(alertMessage);
 
-                            // Disparo sonoro
-                            if (EnableSound)
-                            {
-                                Notifications.PlaySound(SoundPath);
-                            }
+                            if (EnableSound) Notifications.PlaySound(SoundPath);
 
                             if (RunningMode == RunningMode.RealTime)
                             {
                                 BeginInvokeOnMainThread(() =>
                                 {
-                                    try 
-                                    {
-                                        MessageBox.Show(alertMessage.Replace(" | ", "\n"), "Alerta cTrader", MessageBoxButton.OK, MessageBoxImage.Information);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Print($"Erro ao exibir alerta: {ex.Message}");
-                                    }
+                                    try { MessageBox.Show(alertMessage.Replace(" | ", "\n"), "Alerta cTrader", MessageBoxButton.OK, MessageBoxImage.Information); }
+                                    catch (Exception ex) { Print($"Erro ao exibir alerta: {ex.Message}"); }
                                 });
                             }
 
-                            _lastAlertTime = endTime;
+                            _lastAlertTime = signalDrawTime;
                         }
                     }
                     else

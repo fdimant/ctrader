@@ -122,6 +122,29 @@ namespace cAlgo.Indicators
 
 
         // =========================================================
+        // PDH / PDL (MÁXIMA E MÍNIMA DO DIA ANTERIOR)
+        // =========================================================
+
+        [Parameter("Mostrar Máx/Mín Dia Anterior?", Group = "PDH / PDL", DefaultValue = true)]
+        public bool ShowPdhPdl { get; set; }
+
+        [Parameter("Dias Anteriores (0 = Só Hoje)", Group = "PDH / PDL", DefaultValue = 0, MinValue = 0)]
+        public int PdhPdlDays { get; set; }
+
+        [Parameter("Cor Máxima (PDH)", Group = "PDH / PDL", DefaultValue = "DodgerBlue")]
+        public Color PdhColor { get; set; }
+
+        [Parameter("Cor Mínima (PDL)", Group = "PDH / PDL", DefaultValue = "DeepPink")]
+        public Color PdlColor { get; set; }
+
+        [Parameter("Estilo da Linha", Group = "PDH / PDL", DefaultValue = LineStyle.Lines)]
+        public LineStyle PdhPdlStyle { get; set; }
+
+        [Parameter("Espessura da Linha", Group = "PDH / PDL", DefaultValue = 2, MinValue = 1, MaxValue = 5)]
+        public int PdhPdlThickness { get; set; }
+
+
+        // =========================================================
         // INTERNOS
         // =========================================================
 
@@ -135,6 +158,8 @@ namespace cAlgo.Indicators
         private TimeSpan nyEnd;
 
         private TimeSpan dayStart;
+        
+        private Bars _dailyBars;
 
 
         // =========================================================
@@ -150,26 +175,19 @@ namespace cAlgo.Indicators
             //
             // Horário UTC = Horário informado - UTC Offset
 
-            asianStart = TimeSpan.Parse(AsianStart)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
+            asianStart = TimeSpan.Parse(AsianStart).Add(TimeSpan.FromHours(UtcOffset * -1));
+            asianEnd = TimeSpan.Parse(AsianEnd).Add(TimeSpan.FromHours(UtcOffset * -1));
 
-            asianEnd = TimeSpan.Parse(AsianEnd)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
+            londonStart = TimeSpan.Parse(LondonStart).Add(TimeSpan.FromHours(UtcOffset * -1));
+            londonEnd = TimeSpan.Parse(LondonEnd).Add(TimeSpan.FromHours(UtcOffset * -1));
 
-            londonStart = TimeSpan.Parse(LondonStart)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
+            nyStart = TimeSpan.Parse(NewYorkStart).Add(TimeSpan.FromHours(UtcOffset * -1));
+            nyEnd = TimeSpan.Parse(NewYorkEnd).Add(TimeSpan.FromHours(UtcOffset * -1));
 
-            londonEnd = TimeSpan.Parse(LondonEnd)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
-
-            nyStart = TimeSpan.Parse(NewYorkStart)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
-
-            nyEnd = TimeSpan.Parse(NewYorkEnd)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
-
-            dayStart = TimeSpan.Parse(DayStart)
-                .Add(TimeSpan.FromHours(UtcOffset * -1));
+            dayStart = TimeSpan.Parse(DayStart).Add(TimeSpan.FromHours(UtcOffset * -1));
+            
+            // Carrega a série diária para cálculos de PDH e PDL
+            _dailyBars = MarketData.GetBars(TimeFrame.Daily);
         }
 
 
@@ -179,62 +197,85 @@ namespace cAlgo.Indicators
 
         public override void Calculate(int index)
         {
-            // -----------------------------------------------------
-            // Verifica o timeframe
-            // -----------------------------------------------------
-
-            if (GetTimeFrameMinutes(Bars.TimeFrame) >
-                GetTimeFrameMinutes(MaxTimeFrame))
+            // Verifica o timeframe máximo para as sessões
+            if (GetTimeFrameMinutes(Bars.TimeFrame) > GetTimeFrameMinutes(MaxTimeFrame))
                 return;
 
-
             DateTime barDate = Bars.OpenTimes[index].Date;
-
-            DateTime cutoffDate =
-                Server.Time.Date.AddDays(-NumberOfDays + 1);
+            DateTime cutoffDate = Server.Time.Date.AddDays(-NumberOfDays + 1);
 
             if (barDate < cutoffDate)
                 return;
 
-
-            // -----------------------------------------------------
             // DAY START
-            // -----------------------------------------------------
-
             if (UseDayStart)
                 DrawDayStart(index);
 
-
-            // -----------------------------------------------------
             // SESSÕES
-            // -----------------------------------------------------
+            if (EnableAsian) DrawSession(index, AsianSessionName, asianStart, asianEnd, AsianColor);
+            if (EnableLondon) DrawSession(index, LondonSessionName, londonStart, londonEnd, LondonColor);
+            if (EnableNewYork) DrawSession(index, NewYorkSessionName, nyStart, nyEnd, NewYorkColor);
+            
+            // PDH/PDL - Desenhamos apenas no último candle para evitar duplicidade e pesar o gráfico
+            if (IsLastBar)
+            {
+                DrawPdhPdl();
+            }
+        }
 
-            if (EnableAsian)
-                DrawSession(
-                    index,
-                    AsianSessionName,
-                    asianStart,
-                    asianEnd,
-                    AsianColor
-                );
 
-            if (EnableLondon)
-                DrawSession(
-                    index,
-                    LondonSessionName,
-                    londonStart,
-                    londonEnd,
-                    LondonColor
-                );
+        // =========================================================
+        // PDH / PDL
+        // =========================================================
+        
+        private void DrawPdhPdl()
+        {
+            // Limpa linhas anteriores
+            foreach (var obj in Chart.Objects)
+            {
+                if (obj.Name.StartsWith("pdh_") || obj.Name.StartsWith("pdl_"))
+                {
+                    Chart.RemoveObject(obj.Name);
+                }
+            }
 
-            if (EnableNewYork)
-                DrawSession(
-                    index,
-                    NewYorkSessionName,
-                    nyStart,
-                    nyEnd,
-                    NewYorkColor
-                );
+            // Regra: Só desenhar se estiver ativado, houver dados suficientes, e o TF for menor que o D1
+            if (!ShowPdhPdl || TimeFrame >= TimeFrame.Daily || _dailyBars == null || _dailyBars.Count < 2)
+                return;
+
+            int lastDailyIndex = _dailyBars.Count - 1;
+            int startDailyIndex = Math.Max(1, lastDailyIndex - PdhPdlDays);
+
+            for (int d = startDailyIndex; d <= lastDailyIndex; d++)
+            {
+                // Busca máxima e mínima do dia ANTERIOR (d - 1)
+                double pdh = _dailyBars.HighPrices[d - 1];
+                double pdl = _dailyBars.LowPrices[d - 1];
+
+                DateTime todayStart = _dailyBars.OpenTimes[d];
+                
+                int ltfStartIndex = Bars.OpenTimes.GetIndexByTime(todayStart);
+                if (ltfStartIndex == -1) continue; 
+
+                DateTime nextDayStart = (d < _dailyBars.Count - 1) ? _dailyBars.OpenTimes[d + 1] : todayStart.AddDays(1);
+                
+                int ltfEndIndex = Bars.Count - 1;
+                int nextDayLtfIndex = Bars.OpenTimes.GetIndexByTime(nextDayStart);
+                
+                if (nextDayLtfIndex != -1)
+                {
+                    ltfEndIndex = Math.Max(ltfStartIndex, nextDayLtfIndex - 1);
+                }
+                
+                DateTime drawStart = Bars.OpenTimes[ltfStartIndex];
+                DateTime drawEnd = (d == _dailyBars.Count - 1) ? drawStart.AddDays(1) : Bars.OpenTimes[ltfEndIndex];
+
+                string pdhName = "pdh_" + d;
+                string pdlName = "pdl_" + d;
+
+                Chart.DrawTrendLine(pdhName, drawStart, pdh, drawEnd, pdh, PdhColor, PdhPdlThickness, PdhPdlStyle);
+                Chart.DrawTrendLine(pdlName, drawStart, pdl, drawEnd, pdl, PdlColor, PdhPdlThickness, PdhPdlStyle);
+            }
         }
 
 
@@ -245,41 +286,23 @@ namespace cAlgo.Indicators
         private void DrawDayStart(int index)
         {
             DateTime candleStart = Bars.OpenTimes[index];
-
             DateTime candleEnd;
 
-            // Se for o último candle disponível, usamos a duração
-            // do timeframe para determinar o seu final.
             if (index < Bars.Count - 1)
             {
                 candleEnd = Bars.OpenTimes[index + 1];
             }
             else
             {
-                candleEnd = candleStart.AddMinutes(
-                    GetTimeFrameMinutes(Bars.TimeFrame)
-                );
+                candleEnd = candleStart.AddMinutes(GetTimeFrameMinutes(Bars.TimeFrame));
             }
 
-            // Day Start do dia correspondente ao candle
             DateTime dayStartTime = candleStart.Date + dayStart;
 
-            // Se o Day Start estiver dentro deste candle,
-            // desenhamos a linha no início do candle.
-            if (dayStartTime >= candleStart &&
-                dayStartTime < candleEnd)
+            if (dayStartTime >= candleStart && dayStartTime < candleEnd)
             {
-                string objectName =
-                    "DAYSTART_" +
-                    dayStartTime.ToString("yyyyMMdd");
-
-                Chart.DrawVerticalLine(
-                    objectName,
-                    candleStart,
-                    DayStartColor,
-                    DayStartThickness,
-                    LineStyle.Solid
-                );
+                string objectName = "DAYSTART_" + dayStartTime.ToString("yyyyMMdd");
+                Chart.DrawVerticalLine(objectName, candleStart, DayStartColor, DayStartThickness, LineStyle.Solid);
             }
         }
 
@@ -288,47 +311,24 @@ namespace cAlgo.Indicators
         // DRAW SESSION
         // =========================================================
 
-        private void DrawSession(
-            int index,
-            string sessionName,
-            TimeSpan start,
-            TimeSpan end,
-            Color color)
+        private void DrawSession(int index, string sessionName, TimeSpan start, TimeSpan end, Color color)
         {
             DateTime time = Bars.OpenTimes[index];
-
             TimeSpan barTime = time.TimeOfDay;
 
             if (!IsInsideSession(barTime, start, end))
                 return;
 
+            DateTime sessionStartTime = time.Date + start;
+            DateTime sessionEndTime = time.Date + end;
 
-            // -----------------------------------------------------
-            // HORÁRIOS DA SESSÃO
-            // -----------------------------------------------------
-
-            DateTime sessionStartTime =
-                time.Date + start;
-
-            DateTime sessionEndTime =
-                time.Date + end;
-
-
-            // Sessão cruzando meia-noite
             if (end < start)
             {
                 if (barTime < end)
-                    sessionStartTime =
-                        sessionStartTime.AddDays(-1);
+                    sessionStartTime = sessionStartTime.AddDays(-1);
                 else
-                    sessionEndTime =
-                        sessionEndTime.AddDays(1);
+                    sessionEndTime = sessionEndTime.AddDays(1);
             }
-
-
-            // -----------------------------------------------------
-            // HIGH / LOW DA SESSÃO
-            // -----------------------------------------------------
 
             double high = double.MinValue;
             double low = double.MaxValue;
@@ -336,156 +336,50 @@ namespace cAlgo.Indicators
             for (int i = 0; i <= index; i++)
             {
                 DateTime t = Bars.OpenTimes[i];
-
-                if (t >= sessionStartTime &&
-                    t <= sessionEndTime)
+                if (t >= sessionStartTime && t <= sessionEndTime)
                 {
-                    high = Math.Max(
-                        high,
-                        Bars.HighPrices[i]
-                    );
-
-                    low = Math.Min(
-                        low,
-                        Bars.LowPrices[i]
-                    );
+                    high = Math.Max(high, Bars.HighPrices[i]);
+                    low = Math.Min(low, Bars.LowPrices[i]);
                 }
             }
 
-
-            // Segurança
-            if (high == double.MinValue ||
-                low == double.MaxValue)
+            if (high == double.MinValue || low == double.MaxValue)
                 return;
 
+            Color fillColor = Color.FromArgb(Transparency, color);
+            string baseName = sessionName + sessionStartTime.ToString("yyyyMMdd");
 
-            // -----------------------------------------------------
-            // CORES
-            // -----------------------------------------------------
-
-            Color fillColor =
-                Color.FromArgb(
-                    Transparency,
-                    color
-                );
-
-
-            string baseName =
-                sessionName +
-                sessionStartTime.ToString("yyyyMMdd");
-
-
-            // -----------------------------------------------------
-            // RETÂNGULO
-            // -----------------------------------------------------
-
-            var rect = Chart.DrawRectangle(
-                baseName,
-                sessionStartTime,
-                high,
-                sessionEndTime,
-                low,
-                fillColor
-            );
-
+            var rect = Chart.DrawRectangle(baseName, sessionStartTime, high, sessionEndTime, low, fillColor);
             rect.IsFilled = true;
 
-
-            // -----------------------------------------------------
-            // SOMENTE ÚLTIMO DIA
-            // -----------------------------------------------------
-
-            bool isLastDay =
-                sessionStartTime.Date ==
-                Server.Time.Date;
-
+            bool isLastDay = sessionStartTime.Date == Server.Time.Date;
             if (OnlyLastDayHighLow && !isLastDay)
                 return;
 
-
-            // -----------------------------------------------------
-            // PROJEÇÃO DAS LINHAS
-            // -----------------------------------------------------
-
-            DateTime projectionEnd =
-                sessionStartTime.Date.AddDays(1) + start;
-
+            DateTime projectionEnd = sessionStartTime.Date.AddDays(1) + start;
 
             if (ShowLines)
             {
-                Chart.DrawTrendLine(
-                    baseName + "_HIGH",
-                    sessionStartTime,
-                    high,
-                    projectionEnd,
-                    high,
-                    color,
-                    LineThickness,
-                    LineStyle.Solid
-                );
-
-                Chart.DrawTrendLine(
-                    baseName + "_LOW",
-                    sessionStartTime,
-                    low,
-                    projectionEnd,
-                    low,
-                    color,
-                    LineThickness,
-                    LineStyle.Solid
-                );
+                Chart.DrawTrendLine(baseName + "_HIGH", sessionStartTime, high, projectionEnd, high, color, LineThickness, LineStyle.Solid);
+                Chart.DrawTrendLine(baseName + "_LOW", sessionStartTime, low, projectionEnd, low, color, LineThickness, LineStyle.Solid);
             }
-
-
-            // -----------------------------------------------------
-            // LABEL
-            // -----------------------------------------------------
 
             if (ShowLabels)
             {
-                string label =
-                    sessionName;
-
+                string label = sessionName;
                 if (ShowRange)
                 {
-                    double rangePips =
-                        (high - low) /
-                        Symbol.PipSize;
-
-                    label +=
-                        $" ({Math.Round(rangePips, 1)} pips)";
+                    double rangePips = (high - low) / Symbol.PipSize;
+                    label += $" ({Math.Round(rangePips, 1)} pips)";
                 }
 
+                double offset = (high - low) * 0.02;
+                double minimumOffset = Symbol.PipSize * 2;
+                offset = Math.Max(offset, minimumOffset);
+                double labelY = high + offset;
 
-                // Coloca o label acima da máxima.
-                double offset =
-                    (high - low) * 0.02;
-
-                // Para sessões com range muito pequeno,
-                // garante um deslocamento mínimo.
-                double minimumOffset =
-                    Symbol.PipSize * 2;
-
-                offset =
-                    Math.Max(
-                        offset,
-                        minimumOffset
-                    );
-
-                double labelY =
-                    high + offset;
-
-
-                var text = Chart.DrawText(
-                    baseName + "_LABEL",
-                    label,
-                    sessionStartTime,
-                    labelY,
-                    color
-                );
-
-                text.VerticalAlignment =
-                    VerticalAlignment.Bottom;
+                var text = Chart.DrawText(baseName + "_LABEL", label, sessionStartTime, labelY, color);
+                text.VerticalAlignment = VerticalAlignment.Bottom;
             }
         }
 
@@ -494,18 +388,12 @@ namespace cAlgo.Indicators
         // VERIFICA SE ESTÁ DENTRO DA SESSÃO
         // =========================================================
 
-        private bool IsInsideSession(
-            TimeSpan time,
-            TimeSpan start,
-            TimeSpan end)
+        private bool IsInsideSession(TimeSpan time, TimeSpan start, TimeSpan end)
         {
             if (start < end)
-                return time >= start &&
-                       time <= end;
+                return time >= start && time <= end;
 
-            // Sessão cruza meia-noite
-            return time >= start ||
-                   time <= end;
+            return time >= start || time <= end;
         }
 
 
@@ -513,47 +401,21 @@ namespace cAlgo.Indicators
         // TIMEFRAME EM MINUTOS
         // =========================================================
 
-        private int GetTimeFrameMinutes(
-            TimeFrame timeFrame)
+        private int GetTimeFrameMinutes(TimeFrame timeFrame)
         {
-            if (timeFrame == TimeFrame.Minute)
-                return 1;
-
-            if (timeFrame == TimeFrame.Minute2)
-                return 2;
-
-            if (timeFrame == TimeFrame.Minute3)
-                return 3;
-
-            if (timeFrame == TimeFrame.Minute4)
-                return 4;
-
-            if (timeFrame == TimeFrame.Minute5)
-                return 5;
-
-            if (timeFrame == TimeFrame.Minute10)
-                return 10;
-
-            if (timeFrame == TimeFrame.Minute15)
-                return 15;
-
-            if (timeFrame == TimeFrame.Minute30)
-                return 30;
-
-            if (timeFrame == TimeFrame.Hour)
-                return 60;
-
-            if (timeFrame == TimeFrame.Hour4)
-                return 240;
-
-            if (timeFrame == TimeFrame.Daily)
-                return 1440;
-
-            if (timeFrame == TimeFrame.Weekly)
-                return 10080;
-
-            if (timeFrame == TimeFrame.Monthly)
-                return 43200;
+            if (timeFrame == TimeFrame.Minute) return 1;
+            if (timeFrame == TimeFrame.Minute2) return 2;
+            if (timeFrame == TimeFrame.Minute3) return 3;
+            if (timeFrame == TimeFrame.Minute4) return 4;
+            if (timeFrame == TimeFrame.Minute5) return 5;
+            if (timeFrame == TimeFrame.Minute10) return 10;
+            if (timeFrame == TimeFrame.Minute15) return 15;
+            if (timeFrame == TimeFrame.Minute30) return 30;
+            if (timeFrame == TimeFrame.Hour) return 60;
+            if (timeFrame == TimeFrame.Hour4) return 240;
+            if (timeFrame == TimeFrame.Daily) return 1440;
+            if (timeFrame == TimeFrame.Weekly) return 10080;
+            if (timeFrame == TimeFrame.Monthly) return 43200;
 
             return int.MaxValue;
         }
